@@ -18,8 +18,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/ci4rail/sio02_host/devsim/internal/tracelet"
-	"github.com/ci4rail/sio02_host/devsim/pkg/version"
+	"github.com/ci4rail/tracelet_host/devsim/internal/tracelet"
+	"github.com/ci4rail/tracelet_host/devsim/pkg/version"
 	"github.com/spf13/cobra"
 )
 

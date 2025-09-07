@@ -79,7 +79,7 @@ func (e *Tracelet) locationClient(locationServerAddress string) error {
 	return nil
 }
 
-func (e *Tracelet) makeTraceletToServerMessage(id int32) *pb.TraceletToServer {
+func (e *Tracelet) makeTraceletToServerMessage(_ int32) *pb.TraceletToServer {
 	return &pb.TraceletToServer{
 		TraceletId: e.deviceID,
 		Ignition:   true,

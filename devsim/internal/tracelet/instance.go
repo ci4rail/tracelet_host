@@ -13,28 +13,18 @@ limitations under the License.
 
 package tracelet
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/ci4rail/tracelet_host/devsim/pkg/io4edge_core"
+)
 
 // Tracelet represents the tracelet functionality
 type Tracelet struct {
-	deviceID             string
-	loc                  location
-	locMutex             sync.Mutex // mutex to protect loc
-	// security
-	username string
-	password string
-
-	// crypto material
-	certificatePEM string
-	privateKeyPEM  string
-
-	// fw/hw
-	fw   FirmwareVersion
-	hw   HardwareInventory
-	repl []string
-
-	// parameters (core + vwu share same store in this mock)
-	params map[string]string
+	loc      location
+	locMutex sync.Mutex // mutex to protect loc
+	deviceID string
+	coreDev     *io4edgecore.Device
 }
 
 // NewInstance creates a new Easylocate simulator instance
@@ -42,8 +32,23 @@ func NewInstance(deviceID string, locationServerAddress string) (*Tracelet, erro
 	e := &Tracelet{
 		deviceID: deviceID,
 	}
-
-	err := e.locationClient(locationServerAddress)
+	coreDev, err := io4edgecore.NewDevice(
+		&io4edgecore.FirmwareVersion{
+			Name:    "tracelet",
+			Version: "1.0.0",
+		},
+		&io4edgecore.HardwareInventory{
+			Name:   "devsim",
+			Rev:    1,
+			Serial: deviceID,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	e.coreDev = coreDev
+	// start core server	
+	err = e.locationClient(locationServerAddress)
 	if err != nil {
 		return nil, err
 	}

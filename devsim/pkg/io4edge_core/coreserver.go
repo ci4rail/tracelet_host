@@ -30,6 +30,7 @@ const (
 	apiBase     = "/api/v1"
 )
 
+
 // --- In-memory device model --------------------------------------------------
 
 type ErrorInfo struct {
@@ -37,26 +38,18 @@ type ErrorInfo struct {
 	Message string `json:"message"`
 }
 
-type FirmwareVersion struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
-type HardwareInventory struct {
-	Name   string `json:"name"`
-	Rev    int    `json:"rev"`
-	Serial string `json:"serial"`
-}
-
 type ParameterSetGet struct {
+	Version    string            `json:"version"`
 	Parameters map[string]string `json:"parameters"`
 }
 
 type ParameterSetPut struct {
+	Version    string            `json:"version"`
 	Parameters map[string]string `json:"parameters"`
 }
 
-type Device struct {
+type CoreServer struct {
+	dev *Device
 	// security
 	username string
 	password string
@@ -64,43 +57,28 @@ type Device struct {
 	// crypto material
 	certificatePEM string
 	privateKeyPEM  string
-
-	// fw/hw
-	fw   FirmwareVersion
-	hw   HardwareInventory
-	repl []string
-
-	// parameters (core + vwu share same store in this mock)
-	params map[string]string
 }
 
-func newDevice() *Device {
-	return &Device{
+func NewCoreServer(dev *Device, addr string) (*CoreServer, error) {
+	cs := &CoreServer{
+		dev:      dev,
 		username: defaultUser,
 		password: defaultPass,
-		fw: FirmwareVersion{
-			Name:    "fw_sio06_default",
-			Version: "1.0.0",
-		},
-		hw: HardwareInventory{
-			Name:   "S103-LTR01",
-			Rev:    0,
-			Serial: "00000000-0000-0000-0000-000000000000",
-		},
-		params: map[string]string{
-			"device-id": "SIO06-DEV-1",
-		},
 	}
+	if err := cs.start(addr); err != nil {
+		return nil, fmt.Errorf("failed to start core server: %w", err)
+	}
+	return cs, nil
 }
 
 // --- Basic auth middleware ---------------------------------------------------
 
-func basicAuth(dev *Device) func(http.Handler) http.Handler {
+func basicAuth(cs *CoreServer) func(http.Handler) http.Handler {
 	realm := "io4edge-sio06"
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			u, p, ok := r.BasicAuth()
-			if !ok || u != dev.username || p != dev.password {
+			if !ok || u != cs.username || p != cs.password {
 				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
 				httpError(w, http.StatusUnauthorized, "unauthorized")
 				return
@@ -145,7 +123,7 @@ func readBodyText(r *http.Request, max int64) (string, error) {
 			if err.Error() == "EOF" {
 				break
 			}
-			if n == 0 && err != nil && err.Error() != "EOF" {
+			if n == 0 && err.Error() != "EOF" {
 				return "", err
 			}
 			break
@@ -167,7 +145,7 @@ type changePasswordRequest struct {
 	Password string `json:"password"`
 }
 
-func changePassword(dev *Device) http.HandlerFunc {
+func changePassword(cs *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := chi.URLParam(r, "user")
 		if user == "" {
@@ -179,18 +157,18 @@ func changePassword(dev *Device) http.HandlerFunc {
 			httpError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if user != dev.username {
+		if user != cs.username {
 			// In a real device you might 404 or forbid — here we restrict to the single account.
 			httpError(w, http.StatusForbidden, "only io4edge user can be modified")
 			return
 		}
-		dev.password = req.Password
+		cs.password = req.Password
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
 // PUT /certificate — upload PEM certificate
-func putCertificate(dev *Device) http.HandlerFunc {
+func putCertificate(cs *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		text, err := readBodyText(r, 1<<20) // 1 MiB
 		if err != nil {
@@ -201,13 +179,13 @@ func putCertificate(dev *Device) http.HandlerFunc {
 			httpError(w, http.StatusBadRequest, "expected PEM certificate in request body")
 			return
 		}
-		dev.certificatePEM = text
+		cs.certificatePEM = text
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
 // PUT /key — upload PEM private key
-func putKey(dev *Device) http.HandlerFunc {
+func putKey(cs *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		text, err := readBodyText(r, 1<<20)
 		if err != nil {
@@ -218,19 +196,19 @@ func putKey(dev *Device) http.HandlerFunc {
 			httpError(w, http.StatusBadRequest, "expected PEM private key in request body")
 			return
 		}
-		dev.privateKeyPEM = text
+		cs.privateKeyPEM = text
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
 // GET /firmware — current version; POST /firmware — upload new (mock)
-func getFirmware(dev *Device) http.HandlerFunc {
+func getFirmware(cs *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, dev.fw)
+		writeJSON(w, cs.dev.fw)
 	}
 }
 
-func postFirmware(dev *Device) http.HandlerFunc {
+func postFirmware(cs *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Accept arbitrary bytes (a .fwpkg), pretend to verify & install.
 		// Optional header X-Firmware-Name: and X-Firmware-Version:
@@ -244,32 +222,33 @@ func postFirmware(dev *Device) http.HandlerFunc {
 		}
 		// drain body but ignore content
 		_, _ = readBodyText(r, 20<<20) // 20 MiB
-		dev.fw = FirmwareVersion{Name: name, Version: ver}
+		cs.dev.fw = FirmwareVersion{Name: name, Version: ver}
 		// Spec suggests device restarts automatically; we simulate 202 Accepted.
 		w.WriteHeader(http.StatusAccepted)
 	}
 }
 
 // GET /hardware
-func getHardware(dev *Device) http.HandlerFunc {
+func getHardware(cs *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, dev.hw)
+		writeJSON(w, cs.dev.hw)
 	}
 }
 
 // POST /restart
-func postRestart(_ *Device) http.HandlerFunc {
+func postRestart(_ *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
+		os.Exit(0) // in real device, restart the system; here we just exit
 	}
 }
 
 // POST /factoryreset
-func postFactoryReset(dev *Device) http.HandlerFunc {
+func postFactoryReset(_ *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// wipe parameters to defaults
-		dev.params = map[string]string{"device-id": "SIO06-DEV-1"}
+		ParameterSetForceFactoryDefaults()
 		w.WriteHeader(http.StatusAccepted)
+		os.Exit(0) // in real device, restart the system; here we just exit
 	}
 }
 
@@ -281,7 +260,7 @@ type replResponse struct {
 	Output string `json:"output"`
 }
 
-func postRepl(dev *Device) http.HandlerFunc {
+func postRepl(cs *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req replRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Cmd) == "" {
@@ -289,24 +268,24 @@ func postRepl(dev *Device) http.HandlerFunc {
 			return
 		}
 		out := fmt.Sprintf("OK: %s", req.Cmd)
-		dev.repl = append(dev.repl, out)
+		cs.dev.repl = append(cs.dev.repl, out)
 		writeJSON(w, replResponse{Output: out})
 	}
 }
 
 // GET /parameter — list all core parameters
-func getParameters(dev *Device) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, ParameterSetGet{Parameters: dev.params})
-	}
-}
+// func getParameters(cs *CoreServer) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		writeJSON(w, ParameterSetGet{Parameters: dev.params})
+// 	}
+// }
 
 // PUT /parameter/{parameter} — set one
 type setParamRequest struct {
 	Value string `json:"value"`
 }
 
-func putParameter(dev *Device) http.HandlerFunc {
+func putParameter(cs *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "parameter")
 		if name == "" {
@@ -318,29 +297,30 @@ func putParameter(dev *Device) http.HandlerFunc {
 			httpError(w, http.StatusBadRequest, "invalid body")
 			return
 		}
-		dev.params[name] = req.Value
+		if err := cs.dev.globalParams.ParamSetSingle(name, req.Value); err != nil {
+			httpError(w, http.StatusInternalServerError, "failed to set parameter")
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
 // GET /parameter/{parameter} — get one (add convenience not always in spec)
-func getParameter(dev *Device) http.HandlerFunc {
+func getParameter(cs *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "parameter")
-		val, ok := dev.params[name]
-		if !ok {
-			httpError(w, http.StatusNotFound, "parameter not found")
+		val, err := cs.dev.globalParams.ParamGetSingle(name)
+		if err != nil {
+			if errors.Is(err, ErrParameterNotFound) {
+				httpError(w, http.StatusNotFound, "parameter not found")
+				return
+			}
+			httpError(w, http.StatusInternalServerError, "failed to get parameter")
 			return
 		}
 		writeJSON(w, map[string]string{"name": name, "value": val})
 	}
 }
-
-// VWU aliases (vehicle-wakeup-unit specific)
-func getVWUParameters(dev *Device) http.HandlerFunc   { return getParameters(dev) }
-func putVWUParam(dev *Device) http.HandlerFunc        { return putParameter(dev) }
-func getVWUParam(dev *Device) http.HandlerFunc        { return getParameter(dev) }
-func getVWUParameterSet(dev *Device) http.HandlerFunc { return getParameters(dev) }
 
 // --- Router setup ------------------------------------------------------------
 
@@ -349,36 +329,31 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func routes(dev *Device) http.Handler {
+func routes(cs *CoreServer) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger, middleware.Recoverer)
-	r.Use(basicAuth(dev))
+	r.Use(basicAuth(cs))
 
 	r.Route(apiBase, func(api chi.Router) {
-		api.Put("/users/{user}/basic_auth", changePassword(dev))
+		api.Put("/users/{user}/basic_auth", changePassword(cs))
 
-		api.Put("/certificate", putCertificate(dev))
-		api.Put("/key", putKey(dev))
+		api.Put("/certificate", putCertificate(cs))
+		api.Put("/key", putKey(cs))
 
-		api.Get("/firmware", getFirmware(dev))
-		api.Post("/firmware", postFirmware(dev))
+		api.Get("/firmware", getFirmware(cs))
+		api.Post("/firmware", postFirmware(cs))
 
-		api.Get("/hardware", getHardware(dev))
+		api.Get("/hardware", getHardware(cs))
 
-		api.Post("/restart", postRestart(dev))
-		api.Post("/factoryreset", postFactoryReset(dev))
+		api.Post("/restart", postRestart(cs))
+		api.Post("/factoryreset", postFactoryReset(cs))
 
-		api.Post("/repl", postRepl(dev))
+		api.Post("/repl", postRepl(cs))
 
-		api.Get("/parameter", getParameters(dev))
-		api.Get("/parameter/{parameter}", getParameter(dev))
-		api.Put("/parameter/{parameter}", putParameter(dev))
+		// api.Get("/parameter", getParameters(dev))
+		api.Get("/parameter/{parameter}", getParameter(cs))
+		api.Put("/parameter/{parameter}", putParameter(cs))
 
-		// VWU-specific mirrors
-		api.Get("/vwu/parameter", getVWUParameters(dev))
-		api.Get("/vwu/parameter/{parameter}", getVWUParam(dev))
-		api.Put("/vwu/parameter/{parameter}", putVWUParam(dev))
-		api.Get("/vwu/parameterset", getVWUParameterSet(dev))
 	})
 
 	// health
@@ -390,21 +365,11 @@ func routes(dev *Device) http.Handler {
 
 // --- HTTPS bootstrapping -----------------------------------------------------
 
-func main() {
-	addr := env("ADDR", ":8443")
-
-	dev := newDevice()
-	// Allow overriding the default credentials via env.
-	if u := os.Getenv("BASIC_USER"); u != "" {
-		dev.username = u
-	}
-	if p := os.Getenv("BASIC_PASS"); p != "" {
-		dev.password = p
-	}
+func (cs *CoreServer) start(addr string) error {
 
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      routes(dev),
+		Handler:      routes(cs),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -420,30 +385,18 @@ func main() {
 		},
 	}
 
-	certFile := os.Getenv("TLS_CERT_FILE")
-	keyFile := os.Getenv("TLS_KEY_FILE")
-
-	var err error
-	if certFile == "" || keyFile == "" {
-		// Generate ephemeral self-signed cert for local/dev usage.
-		log.Printf("TLS_CERT_FILE/TLS_KEY_FILE not set — generating self-signed certificate for %s", addr)
-		certFile, keyFile, err = generateSelfSigned()
-		if err != nil {
-			log.Fatalf("failed to generate self-signed cert: %v", err)
-		}
+	// Generate ephemeral self-signed cert for local/dev usage.
+	log.Printf("TLS_CERT_FILE/TLS_KEY_FILE not set — generating self-signed certificate for %s", addr)
+	certFile, keyFile, err := generateSelfSigned()
+	if err != nil {
+		return fmt.Errorf("failed to generate self-signed cert: %w", err)
 	}
 
 	log.Printf("Listening on https://%s%s", prettyAddr(addr), apiBase)
 	if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatal(err)
+		return fmt.Errorf("server failed: %w", err)
 	}
-}
-
-func env(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
+	return nil
 }
 
 func prettyAddr(a string) string {
