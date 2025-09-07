@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ const (
 	defaultUser = "io4edge"
 	defaultPass = "core_io4edge" // as documented
 	apiBase     = "/api/v1"
+	firmwareFile = "firmware.bin"
 )
 
 // --- In-memory device model --------------------------------------------------
@@ -94,6 +96,7 @@ func basicAuth(cs *CoreServer) func(http.Handler) http.Handler {
 func httpError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	log.Printf("HTTP %d: %s", status, msg)
 	_ = json.NewEncoder(w).Encode(ErrorInfo{Code: status, Message: msg})
 }
 
@@ -202,30 +205,79 @@ func putKey(cs *CoreServer) http.HandlerFunc {
 	}
 }
 
-// GET /firmware — current version; POST /firmware — upload new (mock)
+// GET /firmware — current version
 func getFirmware(cs *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, cs.dev.fw)
 	}
 }
 
-func postFirmware(cs *CoreServer) http.HandlerFunc {
+// PUT /firmware — upload new firmware (mock)
+func putFirmware(_ *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Accept arbitrary bytes (a .fwpkg), pretend to verify & install.
-		// Optional header X-Firmware-Name: and X-Firmware-Version:
-		name := r.Header.Get("X-Firmware-Name")
-		ver := r.Header.Get("X-Firmware-Version")
-		if name == "" {
-			name = "fw_sio06_default"
+		q := r.URL.Query()
+
+		// offset (optional, defaults to 0)
+		var offset int64 = 0
+		if s := q.Get("offset"); s != "" {
+			v, err := strconv.ParseInt(s, 10, 64)
+			if err != nil || v < 0 {
+				httpError(w, http.StatusBadRequest, "offset must be a non-negative integer")
+				return
+			}
+			offset = v
 		}
-		if ver == "" {
-			ver = "1.0.1"
+
+		// last (optional, defaults to false). Accepts: 1/0, t/f, true/false (case-insensitive).
+		last := false
+		if q.Has("last") { // presence check; avoids treating empty string as "false" silently
+			v, err := strconv.ParseBool(q.Get("last"))
+			if err != nil {
+				httpError(w, http.StatusBadRequest, "last must be a boolean")
+				return
+			}
+			last = v
 		}
-		// drain body but ignore content
-		_, _ = readBodyText(r, 20<<20) // 20 MiB
-		cs.dev.fw = FirmwareVersion{Name: name, Version: ver}
-		// Spec suggests device restarts automatically; we simulate 202 Accepted.
-		w.WriteHeader(http.StatusAccepted)
+
+		if offset == 0 {
+			// create file, overwrite existing
+			_, err := os.Create(firmwareFile)
+			if err != nil {
+				httpError(w, http.StatusInternalServerError, "failed to create firmware file")
+				return
+			}
+		}
+
+		f, err := os.OpenFile(firmwareFile, os.O_WRONLY, 0644)
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "failed to open firmware file")
+			return
+		}
+		defer f.Close()
+
+		_, err = f.Seek(offset, 0)
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "failed to seek in firmware file")
+			return
+		}
+
+		// copy body to file
+		text, err := readBodyText(r, 20<<20)
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "failed to read firmware data")
+			return
+		}
+		_, err = f.WriteString(text)
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "failed to write firmware data")
+			return
+		}
+		time.Sleep(200 * time.Millisecond) // simulate some processing time
+		w.WriteHeader(http.StatusOK)
+
+		if last {
+			restartDevice()
+		}
 	}
 }
 
@@ -236,11 +288,21 @@ func getHardware(cs *CoreServer) http.HandlerFunc {
 	}
 }
 
+func restartDevice() {
+	go func() {
+		// In a real device, this would trigger a system restart.
+		// Here we just exit the process (let docker restart it).
+		time.Sleep(5 * time.Second) // give client time to receive response
+		log.Println("Simulated device restart")
+		os.Exit(0)
+	}()
+}
+
 // POST /restart
 func postRestart(_ *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
-		os.Exit(0) // in real device, restart the system; here we just exit
+		restartDevice()
 	}
 }
 
@@ -249,7 +311,7 @@ func postFactoryReset(_ *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ParameterSetForceFactoryDefaults()
 		w.WriteHeader(http.StatusAccepted)
-		os.Exit(0) // in real device, restart the system; here we just exit
+		restartDevice()
 	}
 }
 
@@ -445,7 +507,7 @@ func routes(cs *CoreServer, additionalRoutes []RouteRegistrar) http.Handler {
 		api.Put("/key", putKey(cs))
 
 		api.Get("/firmware", getFirmware(cs))
-		api.Post("/firmware", postFirmware(cs))
+		api.Put("/firmware", putFirmware(cs))
 
 		api.Get("/hardware", getHardware(cs))
 

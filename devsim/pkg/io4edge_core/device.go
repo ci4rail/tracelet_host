@@ -1,5 +1,10 @@
 package io4edgecore
 
+import (
+	"encoding/json"
+	"os"
+)
+
 type FirmwareVersion struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
@@ -10,7 +15,6 @@ type HardwareInventory struct {
 	Rev    int    `json:"rev"`
 	Serial string `json:"serial"`
 }
-
 
 var globalParamDefs = []ParameterDefinition{
 	{
@@ -33,18 +37,38 @@ var globalParamDefs = []ParameterDefinition{
 
 type Device struct {
 	// fw/hw
-	fw   FirmwareVersion
-	hw   HardwareInventory
+	fw   *FirmwareVersion
+	hw   *HardwareInventory
 	repl []string
 
 	globalParams *ParameterSet
-	cs 		  *CoreServer
+	cs           *CoreServer
+}
+
+// read firmware name and version from firmware file
+func Firmware() FirmwareVersion {
+	f, err := os.Open(firmwareFile)
+	if err != nil {
+		return FirmwareVersion{}
+	}
+	defer f.Close()
+
+	var fw FirmwareVersion
+	if err := json.NewDecoder(f).Decode(&fw); err != nil {
+		return FirmwareVersion{}
+	}
+	return fw
 }
 
 func NewDevice(fw *FirmwareVersion, hw *HardwareInventory, additionalRoutes []RouteRegistrar) (*Device, error) {
+	fwFromFile := Firmware()
+	if fwFromFile.Name != "" && fwFromFile.Version != "" {
+		fw = &fwFromFile
+	}
+
 	d := &Device{
-		fw: *fw,
-		hw: *hw,
+		fw:   fw,
+		hw:   hw,
 		repl: []string{},
 	}
 	nvs, err := NewParamNamespace("global")
