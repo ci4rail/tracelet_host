@@ -56,10 +56,21 @@ type ParameterSetSetRV struct {
 	RebootRequired bool
 }
 
+type ParameterSetListEntry struct {
+	Name 	  string 
+	Description string
+	Default 	  string
+	ReadProtected bool
+	Persistence   string
+}
+
+type ParameterSetListRV []ParameterSetListEntry
+
 type ParameterSet struct {
 	nvsNS *ParamNamespace
 	param map[string]*ParameterInstance
 }
+
 
 func NewParameterSet(nvsNS *ParamNamespace, definitions []ParameterDefinition) (*ParameterSet, error) {
 	if nvsNS == nil {
@@ -92,6 +103,21 @@ func NewParameterSet(nvsNS *ParamNamespace, definitions []ParameterDefinition) (
 		return nil, errors.New("parameter set already exists")
 	}
 	return ps, nil
+}
+
+func (ps *ParameterSet) ListParams() (ParameterSetListRV, error) {
+	var rv ParameterSetListRV
+	for _, p := range ps.param {
+		entry := ParameterSetListEntry{
+			Name:          p.definition.Key,
+			Description:   p.definition.Description,
+			Default:       p.definition.DefaultValue,
+			ReadProtected: p.definition.IsReadProtected,
+			Persistence:   "ESP_NVS",
+		}
+		rv = append(rv, entry)
+	}
+	return rv, nil
 }
 
 func (ps *ParameterSet) getMissing() []string {

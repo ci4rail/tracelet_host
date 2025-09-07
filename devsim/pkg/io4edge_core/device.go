@@ -41,7 +41,7 @@ type Device struct {
 	cs 		  *CoreServer
 }
 
-func NewDevice(fw *FirmwareVersion, hw *HardwareInventory) (*Device, error) {
+func NewDevice(fw *FirmwareVersion, hw *HardwareInventory, additionalRoutes []RouteRegistrar) (*Device, error) {
 	d := &Device{
 		fw: *fw,
 		hw: *hw,
@@ -57,7 +57,7 @@ func NewDevice(fw *FirmwareVersion, hw *HardwareInventory) (*Device, error) {
 	}
 	d.globalParams = ps
 
-	cs, err := NewCoreServer(d, ":9443")
+	cs, err := NewCoreServer(d, ":9443", additionalRoutes)
 	if err != nil {
 		return nil, err
 	}

@@ -17,6 +17,8 @@ import (
 	"sync"
 
 	"github.com/ci4rail/tracelet_host/devsim/pkg/io4edge_core"
+
+
 )
 
 // Tracelet represents the tracelet functionality
@@ -25,13 +27,54 @@ type Tracelet struct {
 	locMutex sync.Mutex // mutex to protect loc
 	deviceID string
 	coreDev     *io4edgecore.Device
+	posParams *io4edgecore.ParameterSet
 }
+
+var posParamDefs = []io4edgecore.ParameterDefinition{
+	{
+		Key:            "ntip-caster",
+		Description:    "NTIP Caster address:port:mountpoint",
+		DefaultValue:   "",
+		MaxLen:         100,
+		RebootRequired: true,
+		Validator:      nil,
+	},
+	{
+		Key:            "ntrip-creds",
+		Description:    "NTRIP Credentials user:password",
+		DefaultValue:   "",
+		MaxLen:         100,
+		RebootRequired: true,
+		Validator:      nil,
+	},
+	{
+		Key:            "loc-srv",
+		Description:    "Location Server address:port",
+		DefaultValue:   "",
+		MaxLen:         64,
+		RebootRequired: true,
+		Validator:      nil,
+	},
+}
+
 
 // NewInstance creates a new Easylocate simulator instance
 func NewInstance(deviceID string, locationServerAddress string) (*Tracelet, error) {
-	e := &Tracelet{
+	tl := &Tracelet{
+		locMutex: sync.Mutex{},
 		deviceID: deviceID,
 	}
+
+	nvs, err := io4edgecore.NewParamNamespace("pos")
+	if err != nil {
+		return nil, err
+	}
+	ps, err := io4edgecore.NewParameterSet(nvs, posParamDefs)
+	if err != nil {
+		return nil, err
+	}
+	tl.posParams = ps
+
 	coreDev, err := io4edgecore.NewDevice(
 		&io4edgecore.FirmwareVersion{
 			Name:    "tracelet",
@@ -42,17 +85,19 @@ func NewInstance(deviceID string, locationServerAddress string) (*Tracelet, erro
 			Rev:    1,
 			Serial: deviceID,
 		},
+		[]io4edgecore.RouteRegistrar{
+			RegistrarTracelet(tl),
+		},
 	)
 	if err != nil {
 		return nil, err
 	}
-	e.coreDev = coreDev
-	// start core server	
-	err = e.locationClient(locationServerAddress)
+	tl.coreDev = coreDev
+	err = tl.locationClient(locationServerAddress)
 	if err != nil {
 		return nil, err
 	}
-	e.locationGenerator()
+	tl.locationGenerator()
 
-	return e, nil
+	return tl, nil
 }

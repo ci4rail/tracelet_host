@@ -30,7 +30,6 @@ const (
 	apiBase     = "/api/v1"
 )
 
-
 // --- In-memory device model --------------------------------------------------
 
 type ErrorInfo struct {
@@ -48,6 +47,8 @@ type ParameterSetPut struct {
 	Parameters map[string]string `json:"parameters"`
 }
 
+type RouteRegistrar func(api chi.Router)
+
 type CoreServer struct {
 	dev *Device
 	// security
@@ -59,13 +60,13 @@ type CoreServer struct {
 	privateKeyPEM  string
 }
 
-func NewCoreServer(dev *Device, addr string) (*CoreServer, error) {
+func NewCoreServer(dev *Device, addr string, additionalRoutes []RouteRegistrar) (*CoreServer, error) {
 	cs := &CoreServer{
 		dev:      dev,
 		username: defaultUser,
 		password: defaultPass,
 	}
-	if err := cs.start(addr); err != nil {
+	if err := cs.start(addr, additionalRoutes); err != nil {
 		return nil, fmt.Errorf("failed to start core server: %w", err)
 	}
 	return cs, nil
@@ -274,30 +275,82 @@ func postRepl(cs *CoreServer) http.HandlerFunc {
 }
 
 // GET /parameter — list all core parameters
-// func getParameters(cs *CoreServer) http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		writeJSON(w, ParameterSetGet{Parameters: dev.params})
-// 	}
-// }
+func getParameters(cs *CoreServer) http.HandlerFunc {
+	return cs.dev.globalParams.ListParameterSetHandlerFunc()
+}
 
-// PUT /parameter/{parameter} — set one
-type setParamRequest struct {
+type putParamRequest struct {
 	Value string `json:"value"`
 }
 
-func putParameter(cs *CoreServer) http.HandlerFunc {
+type putParamSetRequest struct {
+	Version    string            `json:"version"`
+	Parameters map[string]string `json:"parameters"`
+}
+
+type putParamSetResponse struct {
+	Missing        []string `json:"missing_parameters"`
+	Unsupported    []string `json:"unsupported_parameters"`
+	RebootRequired bool     `json:"reboot_required"`
+}
+
+type getParamResponse struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type getParamSetResponse struct {
+	Version        string            `json:"version"`
+	Parameters     map[string]string `json:"parameters"`
+	Unsupported    []string          `json:"unsupported_parameters"`
+	Missing        []string          `json:"missing_parameters"`
+	Invalid        []string          `json:"invalid_parameters"`
+	RebootRequired bool              `json:"reboot_required"`
+}
+
+type listParamsEntry struct {
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Default       string `json:"default"`
+	ReadProtected bool   `json:"read_protected"`
+	Persistence   string `json:"persistence"`
+}
+
+type listParamsResponse []*listParamsEntry
+
+func (ps *ParameterSet) PutParameterSetHandlerFunc() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req putParamSetRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httpError(w, http.StatusBadRequest, "invalid body")
+			return
+		}
+		rv, err := ps.ParameterSetSet(req.Version, req.Parameters)
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "failed to set parameters")
+			return
+		}
+		writeJSON(w, putParamSetResponse{
+			Missing:        rv.Missing,
+			Unsupported:    rv.Unsupported,
+			RebootRequired: rv.RebootRequired,
+		})
+	}
+}
+
+func (ps *ParameterSet) PutParameterHandlerFunc() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "parameter")
 		if name == "" {
 			httpError(w, http.StatusBadRequest, "missing parameter name")
 			return
 		}
-		var req setParamRequest
+		var req putParamRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			httpError(w, http.StatusBadRequest, "invalid body")
 			return
 		}
-		if err := cs.dev.globalParams.ParamSetSingle(name, req.Value); err != nil {
+		if err := ps.ParamSetSingle(name, req.Value); err != nil {
 			httpError(w, http.StatusInternalServerError, "failed to set parameter")
 			return
 		}
@@ -305,11 +358,36 @@ func putParameter(cs *CoreServer) http.HandlerFunc {
 	}
 }
 
-// GET /parameter/{parameter} — get one (add convenience not always in spec)
-func getParameter(cs *CoreServer) http.HandlerFunc {
+func putParameter(cs *CoreServer) http.HandlerFunc {
+	return cs.dev.globalParams.PutParameterHandlerFunc()
+}
+
+func (ps *ParameterSet) GetParameterSetHandlerFunc() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rv, err := ps.ParameterSetGet()
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "failed to get parameters")
+			return
+		}
+		writeJSON(w, getParamSetResponse{
+			Version:        rv.Version,
+			Parameters:     rv.Params,
+			Missing:        rv.Missing,
+			Unsupported:    rv.Unsupported,
+			Invalid:        rv.Invalid,
+			RebootRequired: rv.RebootRequired,
+		})
+	}
+}
+
+func (ps *ParameterSet) GetParameterHandlerFunc() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "parameter")
-		val, err := cs.dev.globalParams.ParamGetSingle(name)
+		if name == "" {
+			httpError(w, http.StatusBadRequest, "missing parameter name")
+			return
+		}
+		val, err := ps.ParamGetSingle(name)
 		if err != nil {
 			if errors.Is(err, ErrParameterNotFound) {
 				httpError(w, http.StatusNotFound, "parameter not found")
@@ -318,7 +396,33 @@ func getParameter(cs *CoreServer) http.HandlerFunc {
 			httpError(w, http.StatusInternalServerError, "failed to get parameter")
 			return
 		}
-		writeJSON(w, map[string]string{"name": name, "value": val})
+		writeJSON(w, getParamResponse{Name: name, Value: val})
+	}
+}
+
+// GET /parameter/{parameter} — get one (add convenience not always in spec)
+func getParameter(cs *CoreServer) http.HandlerFunc {
+	return cs.dev.globalParams.GetParameterHandlerFunc()
+}
+
+func (ps *ParameterSet) ListParameterSetHandlerFunc() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rv, err := ps.ListParams()
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "failed to list parameters")
+			return
+		}
+		resp := make(listParamsResponse, 0, len(rv))
+		for _, e := range rv {
+			resp = append(resp, &listParamsEntry{
+				Name:          e.Name,
+				Description:   e.Description,
+				Default:       e.Default,
+				ReadProtected: e.ReadProtected,
+				Persistence:   e.Persistence,
+			})
+		}
+		writeJSON(w, resp)
 	}
 }
 
@@ -329,7 +433,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func routes(cs *CoreServer) http.Handler {
+func routes(cs *CoreServer, additionalRoutes []RouteRegistrar) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Logger, middleware.Recoverer)
 	r.Use(basicAuth(cs))
@@ -350,10 +454,14 @@ func routes(cs *CoreServer) http.Handler {
 
 		api.Post("/repl", postRepl(cs))
 
-		// api.Get("/parameter", getParameters(dev))
+		api.Get("/parameter", getParameters(cs))
 		api.Get("/parameter/{parameter}", getParameter(cs))
 		api.Put("/parameter/{parameter}", putParameter(cs))
 
+		// additional routes (e.g. for tracelet)
+		for _, ar := range additionalRoutes {
+			ar(api)
+		}
 	})
 
 	// health
@@ -365,11 +473,11 @@ func routes(cs *CoreServer) http.Handler {
 
 // --- HTTPS bootstrapping -----------------------------------------------------
 
-func (cs *CoreServer) start(addr string) error {
+func (cs *CoreServer) start(addr string, additionalRoutes []RouteRegistrar) error {
 
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      routes(cs),
+		Handler:      routes(cs, additionalRoutes),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -393,9 +501,12 @@ func (cs *CoreServer) start(addr string) error {
 	}
 
 	log.Printf("Listening on https://%s%s", prettyAddr(addr), apiBase)
-	if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("server failed: %w", err)
-	}
+
+	go func() {
+		if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("server failed: %v", err)
+		}
+	}()
 	return nil
 }
 
