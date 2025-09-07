@@ -15,11 +15,26 @@ package tracelet
 
 import "sync"
 
-// Tracelet represents the Easylocate functionality
+// Tracelet represents the tracelet functionality
 type Tracelet struct {
 	deviceID             string
 	loc                  location
 	locMutex             sync.Mutex // mutex to protect loc
+	// security
+	username string
+	password string
+
+	// crypto material
+	certificatePEM string
+	privateKeyPEM  string
+
+	// fw/hw
+	fw   FirmwareVersion
+	hw   HardwareInventory
+	repl []string
+
+	// parameters (core + vwu share same store in this mock)
+	params map[string]string
 }
 
 // NewInstance creates a new Easylocate simulator instance

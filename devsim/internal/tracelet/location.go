@@ -81,7 +81,6 @@ func (e *Tracelet) locationClient(locationServerAddress string) error {
 
 func (e *Tracelet) makeTraceletToServerMessage(id int32) *pb.TraceletToServer {
 	return &pb.TraceletToServer{
-		Id:         id,
 		TraceletId: e.deviceID,
 		Ignition:   true,
 		DeliveryTs: timestamppb.Now(),
