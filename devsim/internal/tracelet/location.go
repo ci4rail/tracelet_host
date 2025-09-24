@@ -154,6 +154,10 @@ func makeMetricsMessage(loop int, m *pb.TraceletMetrics)  {
 	m.GnssNumSv = m.GnssNumSats__System__Gps + m.GnssNumSats__System__Glonass + m.GnssNumSats__System__Galileo -1 
 	m.GnssPga__Block__Rf1 = int64(rand.Intn(5)) + 40
 	m.GnssPga__Block__Rf2 = int64(rand.Intn(5)) + 36
+	m.CpuLoadPercent__Cpu___0 = int64(rand.Intn(20) + 10)
+	m.CpuLoadPercent__Cpu___1 = int64(rand.Intn(20) + 10)
+	m.LsiIsConnected = int64(rand.Intn(2))
+	m.ResetCount__Type__Poweron = 1
 }
 
 func channelFromSocketAddress(address string) (*client.Channel, error) {
