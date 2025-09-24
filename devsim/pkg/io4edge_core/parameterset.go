@@ -166,27 +166,27 @@ func (p *ParameterInstance) ParamGet() (string, error) {
 	return value, nil
 }
 
-func (ps *ParameterSet) ParamSetSingle(key string, value string) error {
+func (ps *ParameterSet) ParamSetSingle(key string, value string) (bool, error) {
 	p, exists := ps.param[key]
 	if !exists {
-		return ErrParameterNotFound
+		return parameterRoot.rebootRequired, ErrParameterNotFound
 	}
 	if err := p.paramSetLL(value); err != nil {
-		return err
+		return parameterRoot.rebootRequired, err
 	}
 	version, err := p.ps.nvsNS.GetParam(versionParamKey)
 	if err != nil {
 		version = versionFactory
 	}
 	if strings.HasSuffix(version, versionModified) {
-		return nil
+		return parameterRoot.rebootRequired, nil
 	}
 	version = version + versionModified
 	err = p.ps.nvsNS.SetParam(versionParamKey, version)
 	if err != nil {
-		return err
+		return parameterRoot.rebootRequired, err
 	}
-	return nil
+	return parameterRoot.rebootRequired, nil
 }
 
 func (ps *ParameterSet) ParamGetSingle(key string) (string, error) {

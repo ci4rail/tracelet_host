@@ -63,7 +63,7 @@ func TestParameterSet(t *testing.T) {
 	fmt.Printf("Missing: %v\n", rv2.Missing)
 	fmt.Printf("Unsupported: %v\n", rv2.Unsupported)
 
-	err = ps.ParamSetSingle("param1", "another")
+	_, err = ps.ParamSetSingle("param1", "another")
 	assert.NoError(t, err)
 	val, err := ps.ParamGetSingle("param1")
 	assert.NoError(t, err)

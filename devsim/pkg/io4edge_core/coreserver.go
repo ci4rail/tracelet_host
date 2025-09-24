@@ -26,9 +26,9 @@ import (
 )
 
 const (
-	defaultUser = "io4edge"
-	defaultPass = "core_io4edge" // as documented
-	apiBase     = "/api/v1"
+	defaultUser  = "io4edge"
+	defaultPass  = "core_io4edge" // as documented
+	apiBase      = "/api/v1"
 	firmwareFile = "firmware.bin"
 )
 
@@ -167,7 +167,7 @@ func changePassword(cs *CoreServer) http.HandlerFunc {
 			return
 		}
 		cs.password = req.Password
-		w.WriteHeader(http.StatusNoContent)
+		writeJSON(w, map[string]string{})
 	}
 }
 
@@ -184,7 +184,7 @@ func putCertificate(cs *CoreServer) http.HandlerFunc {
 			return
 		}
 		cs.certificatePEM = text
-		w.WriteHeader(http.StatusNoContent)
+		writeJSON(w, map[string]string{})
 	}
 }
 
@@ -201,7 +201,7 @@ func putKey(cs *CoreServer) http.HandlerFunc {
 			return
 		}
 		cs.privateKeyPEM = text
-		w.WriteHeader(http.StatusNoContent)
+		writeJSON(w, map[string]string{})
 	}
 }
 
@@ -361,6 +361,10 @@ type getParamResponse struct {
 	Value string `json:"value"`
 }
 
+type putParameterResponse struct {
+	RebootRequired bool `json:"reboot_required"`
+}
+
 type getParamSetResponse struct {
 	Version        string            `json:"version"`
 	Parameters     map[string]string `json:"parameters"`
@@ -412,11 +416,12 @@ func (ps *ParameterSet) PutParameterHandlerFunc() http.HandlerFunc {
 			httpError(w, http.StatusBadRequest, "invalid body")
 			return
 		}
-		if err := ps.ParamSetSingle(name, req.Value); err != nil {
+		rebootRequired, err := ps.ParamSetSingle(name, req.Value)
+		if err != nil {
 			httpError(w, http.StatusInternalServerError, "failed to set parameter")
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+		writeJSON(w, putParameterResponse{RebootRequired: rebootRequired})
 	}
 }
 

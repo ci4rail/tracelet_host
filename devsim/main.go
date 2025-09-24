@@ -26,6 +26,7 @@ import (
 var (
 	deviceID              string
 	locationServerAddress string
+	httpsPort             int = 443
 )
 
 func main() {
@@ -43,10 +44,10 @@ var rootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		log.Printf("devsim version: %s\n", version.Version)
 
-		_, err := tracelet.NewInstance(deviceID, locationServerAddress)
+		_, err := tracelet.NewInstance(deviceID, locationServerAddress, httpsPort)
 
 		if err != nil {
-			log.Fatalf("Failed to create eloc instance: %s", err)
+			log.Fatalf("Failed to create tracelet instance: %s", err)
 		}
 		select {} // wait until abort
 	},
@@ -55,4 +56,5 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&deviceID, "dev-id", "d", "devsim", "device id to use")
 	rootCmd.PersistentFlags().StringVarP(&locationServerAddress, "loc-srv", "l", "127.0.0.1:11002", "IP address of location server with port")
+	rootCmd.PersistentFlags().IntVarP(&httpsPort, "https-port", "p", 443, "HTTPS port to use")	
 }

@@ -2,6 +2,7 @@ package io4edgecore
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 )
 
@@ -60,7 +61,7 @@ func Firmware() FirmwareVersion {
 	return fw
 }
 
-func NewDevice(fw *FirmwareVersion, hw *HardwareInventory, additionalRoutes []RouteRegistrar) (*Device, error) {
+func NewDevice(httpsPort int, fw *FirmwareVersion, hw *HardwareInventory, additionalRoutes []RouteRegistrar) (*Device, error) {
 	fwFromFile := Firmware()
 	if fwFromFile.Name != "" && fwFromFile.Version != "" {
 		fw = &fwFromFile
@@ -81,7 +82,7 @@ func NewDevice(fw *FirmwareVersion, hw *HardwareInventory, additionalRoutes []Ro
 	}
 	d.globalParams = ps
 
-	cs, err := NewCoreServer(d, ":9443", additionalRoutes)
+	cs, err := NewCoreServer(d, fmt.Sprintf(":%d", httpsPort), additionalRoutes)
 	if err != nil {
 		return nil, err
 	}

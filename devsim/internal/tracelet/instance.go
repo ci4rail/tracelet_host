@@ -16,24 +16,22 @@ package tracelet
 import (
 	"sync"
 
-	"github.com/ci4rail/tracelet_host/devsim/pkg/io4edge_core"
-
-
+	io4edgecore "github.com/ci4rail/tracelet_host/devsim/pkg/io4edge_core"
 )
 
 // Tracelet represents the tracelet functionality
 type Tracelet struct {
-	loc      location
-	locMutex sync.Mutex // mutex to protect loc
-	deviceID string
-	coreDev     *io4edgecore.Device
+	loc       location
+	locMutex  sync.Mutex // mutex to protect loc
+	deviceID  string
+	coreDev   *io4edgecore.Device
 	posParams *io4edgecore.ParameterSet
 }
 
 var posParamDefs = []io4edgecore.ParameterDefinition{
 	{
-		Key:            "ntip-caster",
-		Description:    "NTIP Caster address:port:mountpoint",
+		Key:            "ntrip-caster",
+		Description:    "NTRIP Caster address:port:mountpoint",
 		DefaultValue:   "",
 		MaxLen:         100,
 		RebootRequired: true,
@@ -57,9 +55,8 @@ var posParamDefs = []io4edgecore.ParameterDefinition{
 	},
 }
 
-
-// NewInstance creates a new Easylocate simulator instance
-func NewInstance(deviceID string, locationServerAddress string) (*Tracelet, error) {
+// NewInstance creates a new tracelet simulator instance
+func NewInstance(deviceID string, locationServerAddress string, httpsPort int) (*Tracelet, error) {
 	tl := &Tracelet{
 		locMutex: sync.Mutex{},
 		deviceID: deviceID,
@@ -76,6 +73,7 @@ func NewInstance(deviceID string, locationServerAddress string) (*Tracelet, erro
 	tl.posParams = ps
 
 	coreDev, err := io4edgecore.NewDevice(
+		httpsPort,
 		&io4edgecore.FirmwareVersion{
 			Name:    "tracelet",
 			Version: "1.0.0",
