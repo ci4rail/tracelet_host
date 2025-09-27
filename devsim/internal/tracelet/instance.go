@@ -21,11 +21,12 @@ import (
 
 // Tracelet represents the tracelet functionality
 type Tracelet struct {
-	loc       location
-	locMutex  sync.Mutex // mutex to protect loc
-	deviceID  string
-	coreDev   *io4edgecore.Device
-	posParams *io4edgecore.ParameterSet
+	loc         location
+	locMutex    sync.Mutex // mutex to protect loc
+	deviceID    string
+	IPv4Address string
+	coreDev     *io4edgecore.Device
+	posParams   *io4edgecore.ParameterSet
 }
 
 var posParamDefs = []io4edgecore.ParameterDefinition{
@@ -56,10 +57,11 @@ var posParamDefs = []io4edgecore.ParameterDefinition{
 }
 
 // NewInstance creates a new tracelet simulator instance
-func NewInstance(deviceID string, locationServerAddress string, httpsPort int) (*Tracelet, error) {
+func NewInstance(deviceID string, locationServerAddress string, IPv4Address string, httpsPort int) (*Tracelet, error) {
 	tl := &Tracelet{
-		locMutex: sync.Mutex{},
-		deviceID: deviceID,
+		locMutex:    sync.Mutex{},
+		deviceID:    deviceID,
+		IPv4Address: IPv4Address,
 	}
 
 	nvs, err := io4edgecore.NewParamNamespace("pos")

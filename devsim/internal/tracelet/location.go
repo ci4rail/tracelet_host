@@ -14,14 +14,17 @@ limitations under the License.
 package tracelet
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"time"
 
 	"github.com/ci4rail/io4edge-client-go/client"
 	pb "github.com/ci4rail/io4edge_api/tracelet/go/tracelet"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -41,8 +44,8 @@ type location struct {
 func (e *Tracelet) locationClient(locationServerAddress string) error {
 	metrics := pb.TraceletMetrics{}
 	m := pb.TraceletToServer_Location{
-		Gnss: &pb.TraceletToServer_Location_Gnss{},
-		Uwb: &pb.TraceletToServer_Location_Uwb{},
+		Gnss:  &pb.TraceletToServer_Location_Gnss{},
+		Uwb:   &pb.TraceletToServer_Location_Uwb{},
 		Fused: &pb.TraceletToServer_Location_Fused{},
 	}
 	go func() {
@@ -79,11 +82,30 @@ func (e *Tracelet) locationClient(locationServerAddress string) error {
 	return nil
 }
 
+func IPv4ToUint32(s string) (uint32, error) {
+	ip := net.ParseIP(s).To4()
+	if ip == nil {
+		return 0, fmt.Errorf("invalid IPv4 address: %q", s)
+	}
+	return binary.BigEndian.Uint32(ip), nil
+}
+
 func (e *Tracelet) makeTraceletToServerMessage(_ int32) *pb.TraceletToServer {
+	uuid := uuid.New()
+	msgID := pb.TraceletMessageID{
+		Value: uuid[:],
+	}
+	ipAsUint32, err := IPv4ToUint32(e.IPv4Address)
+	if err != nil {
+		log.Printf("failed to convert IPv4 address to uint32: %v\n", err)
+		return nil
+	}
 	return &pb.TraceletToServer{
-		TraceletId: e.deviceID,
-		Ignition:   true,
-		DeliveryTs: timestamppb.Now(),
+		TraceletId:  e.deviceID,
+		Ignition:    true,
+		DeliveryTs:  timestamppb.Now(),
+		Uuid:        &msgID,
+		Ipv4Address: ipAsUint32,
 	}
 }
 
@@ -105,7 +127,7 @@ func (e *Tracelet) makeLocationMessage(m *pb.TraceletToServer_Location) {
 	m.Fused.Eph = m.Gnss.Eph
 
 	m.Speed = rand.Float64() * 10
-	m.Temperature = rand.Float64() * 10 + 29
+	m.Temperature = rand.Float64()*10 + 29
 }
 
 func (e *Tracelet) locationGenerator() {
@@ -134,24 +156,24 @@ func (e *Tracelet) locationGenerator() {
 }
 
 // generate some random metrics
-func makeMetricsMessage(loop int, m *pb.TraceletMetrics)  {
+func makeMetricsMessage(loop int, m *pb.TraceletMetrics) {
 	m.Health__Type__UwbComm = 1
 	m.Health__Type__UwbFirmware = 0
 	m.Health__Type__GnssComm = 1
 	m.FreeHeapBytes = int64(rand.Intn(1000) + 20000)
-	m.WifiRssiDbm = 100.0 - rand.Float64() * 50
+	m.WifiRssiDbm = 100.0 - rand.Float64()*50
 	m.NtripIsConnected = int64(rand.Intn(2))
 	m.SntpUpdates += int64(rand.Intn(2))
 
-	if loop % 20 == 0 {
+	if loop%20 == 0 {
 		m.WifiAp = 123
 	} else {
 		m.WifiAp = 456
 	}
-	m.GnssNumSats__System__Gps = int64(rand.Intn(10)+3)
-	m.GnssNumSats__System__Glonass = int64(rand.Intn(10)+3)
-	m.GnssNumSats__System__Galileo = int64(rand.Intn(10)+3)
-	m.GnssNumSv = m.GnssNumSats__System__Gps + m.GnssNumSats__System__Glonass + m.GnssNumSats__System__Galileo -1 
+	m.GnssNumSats__System__Gps = int64(rand.Intn(10) + 3)
+	m.GnssNumSats__System__Glonass = int64(rand.Intn(10) + 3)
+	m.GnssNumSats__System__Galileo = int64(rand.Intn(10) + 3)
+	m.GnssNumSv = m.GnssNumSats__System__Gps + m.GnssNumSats__System__Glonass + m.GnssNumSats__System__Galileo - 1
 	m.GnssPga__Block__Rf1 = int64(rand.Intn(5)) + 40
 	m.GnssPga__Block__Rf2 = int64(rand.Intn(5)) + 36
 	m.CpuLoadPercent__Cpu___0 = int64(rand.Intn(20) + 10)

@@ -25,6 +25,7 @@ import (
 
 var (
 	deviceID              string
+	IPv4Address           string
 	locationServerAddress string
 	httpsPort             int = 443
 )
@@ -44,7 +45,7 @@ var rootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		log.Printf("devsim version: %s\n", version.Version)
 
-		_, err := tracelet.NewInstance(deviceID, locationServerAddress, httpsPort)
+		_, err := tracelet.NewInstance(deviceID, locationServerAddress, IPv4Address, httpsPort)
 
 		if err != nil {
 			log.Fatalf("Failed to create tracelet instance: %s", err)
@@ -55,6 +56,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&deviceID, "dev-id", "d", "devsim", "device id to use")
+	rootCmd.PersistentFlags().StringVarP(&IPv4Address, "ipv4", "i", "127.0.0.1", "IPv4 address to use")
 	rootCmd.PersistentFlags().StringVarP(&locationServerAddress, "loc-srv", "l", "127.0.0.1:11002", "IP address of location server with port")
-	rootCmd.PersistentFlags().IntVarP(&httpsPort, "https-port", "p", 443, "HTTPS port to use")	
+	rootCmd.PersistentFlags().IntVarP(&httpsPort, "https-port", "p", 443, "HTTPS port to use")
 }

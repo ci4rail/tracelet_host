@@ -6,6 +6,7 @@ require (
 	github.com/ci4rail/io4edge-client-go v1.9.0
 	github.com/ci4rail/io4edge_api v1.0.1-0.20250811142049-34cb8aa2880d
 	github.com/go-chi/chi/v5 v5.2.3
+	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.8.4
 	google.golang.org/protobuf v1.31.0
