@@ -20,6 +20,7 @@ import (
 
 	"github.com/ci4rail/tracelet_host/devsim/internal/tracelet"
 	"github.com/ci4rail/tracelet_host/devsim/pkg/version"
+	"github.com/ci4rail/tracelet_host/devsim/pkg/getip"
 	"github.com/spf13/cobra"
 )
 
@@ -45,6 +46,15 @@ var rootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		log.Printf("devsim version: %s\n", version.Version)
 
+		if IPv4Address == "" {
+			ip, err := getip.PrimaryIPv4("eth0")
+			if err != nil {
+				log.Fatalf("Failed to get container IPv4 address: %s", err)
+			}
+			IPv4Address = ip.String()
+		}
+		log.Printf("Using IPv4 address: %s\n", IPv4Address)
+
 		_, err := tracelet.NewInstance(deviceID, locationServerAddress, IPv4Address, httpsPort)
 
 		if err != nil {
@@ -56,7 +66,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&deviceID, "dev-id", "d", "devsim", "device id to use")
-	rootCmd.PersistentFlags().StringVarP(&IPv4Address, "ipv4", "i", "127.0.0.1", "IPv4 address to use")
+	rootCmd.PersistentFlags().StringVarP(&IPv4Address, "ipv4", "i", "", "IPv4 address to use (if not given, auto detected)")
 	rootCmd.PersistentFlags().StringVarP(&locationServerAddress, "loc-srv", "l", "127.0.0.1:11002", "IP address of location server with port")
 	rootCmd.PersistentFlags().IntVarP(&httpsPort, "https-port", "p", 443, "HTTPS port to use")
 }

@@ -15,17 +15,17 @@ package tracelet
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"net"
 	"time"
 
-	"github.com/ci4rail/io4edge-client-go/client"
 	pb "github.com/ci4rail/io4edge_api/tracelet/go/tracelet"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	lsiclient "github.com/ci4rail/tracelet_host/devsim/pkg/lsi_client"
 )
 
 type location struct {
@@ -42,6 +42,7 @@ type location struct {
 
 // publish location to server periodically
 func (e *Tracelet) locationClient(locationServerAddress string) error {
+	lsiClient := lsiclient.NewInstance(locationServerAddress)
 	metrics := pb.TraceletMetrics{}
 	m := pb.TraceletToServer_Location{
 		Gnss:  &pb.TraceletToServer_Location_Gnss{},
@@ -51,32 +52,27 @@ func (e *Tracelet) locationClient(locationServerAddress string) error {
 	go func() {
 		loopCnt := 0
 		for {
-			log.Printf("try to connect to %v\n", locationServerAddress)
-			ch, err := channelFromSocketAddress(locationServerAddress)
-
-			if err == nil {
-				defer ch.Close()
-				for {
-					e.makeLocationMessage(&m)
-					t2s := e.makeTraceletToServerMessage(0)
-					t2s.Type = &pb.TraceletToServer_Location_{Location: &m}
-					if loopCnt%3 == 0 {
-						makeMetricsMessage(loopCnt, &metrics)
-						t2s.Metrics = &metrics
-					}
-					loopCnt++
-
-					fmt.Printf("locationClient WriteMessage: %v\n", t2s)
-
-					err := ch.WriteMessage(t2s)
-					if err != nil {
-						log.Printf("locationClient WriteMessage failed, %v\n", err)
-						break
-					}
-					time.Sleep(1000 * time.Millisecond)
+			for {
+				e.makeLocationMessage(&m)
+				t2s := e.makeTraceletToServerMessage(0)
+				t2s.Type = &pb.TraceletToServer_Location_{Location: &m}
+				if loopCnt%3 == 0 {
+					makeMetricsMessage(lsiClient, loopCnt, &metrics)
+					t2s.Metrics = &metrics
 				}
+				loopCnt++
+
+				log.Printf("locationClient WriteMessage: %v\n", t2s)
+
+				payload, err := proto.Marshal(t2s)
+				if err != nil {
+					log.Printf("locationClient: failed to marshal TraceletToServer message: %v\n", err)
+					continue
+				}
+				lsiClient.PushMessage(payload)
+
+				time.Sleep(1000 * time.Millisecond)
 			}
-			time.Sleep(1000 * time.Millisecond)
 		}
 	}()
 	return nil
@@ -156,7 +152,7 @@ func (e *Tracelet) locationGenerator() {
 }
 
 // generate some random metrics
-func makeMetricsMessage(loop int, m *pb.TraceletMetrics) {
+func makeMetricsMessage(lsiClient *lsiclient.Instance,  loop int, m *pb.TraceletMetrics) {
 	m.Health__Type__UwbComm = 1
 	m.Health__Type__UwbFirmware = 0
 	m.Health__Type__GnssComm = 1
@@ -178,15 +174,11 @@ func makeMetricsMessage(loop int, m *pb.TraceletMetrics) {
 	m.GnssPga__Block__Rf2 = int64(rand.Intn(5)) + 36
 	m.CpuLoadPercent__Cpu___0 = int64(rand.Intn(20) + 10)
 	m.CpuLoadPercent__Cpu___1 = int64(rand.Intn(20) + 10)
-	m.LsiIsConnected = int64(rand.Intn(2))
-	m.ResetCount__Type__Poweron = 1
-}
-
-func channelFromSocketAddress(address string) (*client.Channel, error) {
-	c, err := client.NewUDPClientFromSocketAddress(address)
-	if err != nil {
-		return nil, errors.New("can't create UDP client: " + err.Error())
+	if lsiClient.IsConnected {
+		m.LsiIsConnected = 1
+	} else {
+		m.LsiIsConnected = 0
 	}
-
-	return c.Ch, nil
+	m.LsiAcksMissed = int64(lsiClient.AcksMissed)
+	m.ResetCount__Type__Poweron = 1
 }
