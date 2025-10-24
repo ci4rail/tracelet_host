@@ -116,6 +116,15 @@ func (e *Tracelet) makeLocationMessage(m *pb.TraceletToServer_Location) {
 	m.Gnss.Epv = rand.Float64() * 5
 	m.Gnss.FixType = e.loc.gnssFix
 
+	m.Uwb.Valid = e.loc.uwbValid
+	m.Uwb.X = e.loc.uwbX
+	m.Uwb.Y = e.loc.uwbY
+	m.Uwb.Z = e.loc.uwbZ
+	m.Uwb.Eph = rand.Float64() * 0.2
+	m.Uwb.FixType = 1
+
+	// for simplicity, just use GNSS as fused location
+
 	m.Fused.Valid = true
 	m.Fused.Latitude = e.loc.gnssLat
 	m.Fused.Longitude = e.loc.gnssLon
@@ -131,10 +140,10 @@ func (e *Tracelet) locationGenerator() {
 
 		for {
 			loc := location{
-				uwbValid:  false,
-				uwbX:      5.0,
-				uwbY:      6.21,
-				uwbZ:      7.5,
+				uwbValid:  true,
+				uwbX:      5.0 + rand.Float64()*10,
+				uwbY:      6.21 + rand.Float64()*10,
+				uwbZ:      7.5 + rand.Float64()*10,
 				gnssValid: true,
 				gnssLat:   49.425111 + rand.Float64()*0.0001,
 				gnssLon:   11.077378 + rand.Float64()*0.0001,
