@@ -388,12 +388,12 @@ func (ps *ParameterSet) PutParameterSetHandlerFunc() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req putParamSetRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			httpError(w, http.StatusBadRequest, "invalid body")
+			httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
 			return
 		}
 		rv, err := ps.ParameterSetSet(req.Version, req.Parameters)
 		if err != nil {
-			httpError(w, http.StatusInternalServerError, "failed to set parameters")
+			httpError(w, http.StatusInternalServerError, fmt.Sprintf("failed to set parameters: %v", err))
 			return
 		}
 		writeJSON(w, putParamSetResponse{
