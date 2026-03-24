@@ -1,5 +1,5 @@
 # tracelet_host
-Host examples and protobuf files for "Tracelets" (SIO02/03/04 devices)
+Host examples and simulators for "Tracelets" (LTR01 and SIO02)
 
 ## Protobuf definitions
 The `proto` files can be found [here](./io4edge_api/tracelet/proto/v1/tracelet.proto)
