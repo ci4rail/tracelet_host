@@ -13,26 +13,91 @@ limitations under the License.
 
 package tracelet
 
-import "sync"
+import (
+	"sync"
 
-// Tracelet represents the Easylocate functionality
+	io4edgecore "github.com/ci4rail/tracelet_host/devsim/pkg/io4edge_core"
+)
+
+// Tracelet represents the tracelet functionality
 type Tracelet struct {
-	deviceID             string
-	loc                  location
-	locMutex             sync.Mutex // mutex to protect loc
+	loc         location
+	locMutex    sync.Mutex // mutex to protect loc
+	deviceID    string
+	IPv4Address string
+	coreDev     *io4edgecore.Device
+	posParams   *io4edgecore.ParameterSet
 }
 
-// NewInstance creates a new Easylocate simulator instance
-func NewInstance(deviceID string, locationServerAddress string) (*Tracelet, error) {
-	e := &Tracelet{
-		deviceID: deviceID,
+var posParamDefs = []io4edgecore.ParameterDefinition{
+	{
+		Key:            "ntrip-caster",
+		Description:    "NTRIP Caster address:port:mountpoint",
+		DefaultValue:   "",
+		MaxLen:         100,
+		RebootRequired: true,
+		Validator:      nil,
+	},
+	{
+		Key:            "ntrip-creds",
+		Description:    "NTRIP Credentials user:password",
+		DefaultValue:   "",
+		MaxLen:         100,
+		RebootRequired: true,
+		Validator:      nil,
+	},
+	{
+		Key:            "loc-srv",
+		Description:    "Location Server address:port",
+		DefaultValue:   "",
+		MaxLen:         64,
+		RebootRequired: true,
+		Validator:      nil,
+	},
+}
+
+// NewInstance creates a new tracelet simulator instance
+func NewInstance(deviceID string, locationServerAddress string, IPv4Address string, httpsPort int) (*Tracelet, error) {
+	tl := &Tracelet{
+		locMutex:    sync.Mutex{},
+		deviceID:    deviceID,
+		IPv4Address: IPv4Address,
 	}
 
-	err := e.locationClient(locationServerAddress)
+	nvs, err := io4edgecore.NewParamNamespace("pos")
 	if err != nil {
 		return nil, err
 	}
-	e.locationGenerator()
+	ps, err := io4edgecore.NewParameterSet(nvs, posParamDefs)
+	if err != nil {
+		return nil, err
+	}
+	tl.posParams = ps
 
-	return e, nil
+	coreDev, err := io4edgecore.NewDevice(
+		httpsPort,
+		&io4edgecore.FirmwareVersion{
+			Name:    "tracelet",
+			Version: "1.0.0",
+		},
+		&io4edgecore.HardwareInventory{
+			Name:   "devsim",
+			Rev:    1,
+			Serial: deviceID,
+		},
+		[]io4edgecore.RouteRegistrar{
+			RegistrarTracelet(tl),
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	tl.coreDev = coreDev
+	err = tl.locationClient(locationServerAddress)
+	if err != nil {
+		return nil, err
+	}
+	tl.locationGenerator()
+
+	return tl, nil
 }

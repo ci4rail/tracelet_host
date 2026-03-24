@@ -14,15 +14,18 @@ limitations under the License.
 package tracelet
 
 import (
-	"errors"
+	"encoding/binary"
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"time"
 
-	"github.com/ci4rail/io4edge-client-go/client"
 	pb "github.com/ci4rail/io4edge_api/tracelet/go/tracelet"
+	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	lsiclient "github.com/ci4rail/tracelet_host/devsim/pkg/lsi_client"
 )
 
 type location struct {
@@ -39,52 +42,66 @@ type location struct {
 
 // publish location to server periodically
 func (e *Tracelet) locationClient(locationServerAddress string) error {
+	lsiClient := lsiclient.NewInstance(locationServerAddress)
 	metrics := pb.TraceletMetrics{}
 	m := pb.TraceletToServer_Location{
-		Gnss: &pb.TraceletToServer_Location_Gnss{},
-		Uwb: &pb.TraceletToServer_Location_Uwb{},
+		Gnss:  &pb.TraceletToServer_Location_Gnss{},
+		Uwb:   &pb.TraceletToServer_Location_Uwb{},
 		Fused: &pb.TraceletToServer_Location_Fused{},
 	}
 	go func() {
 		loopCnt := 0
 		for {
-			log.Printf("try to connect to %v\n", locationServerAddress)
-			ch, err := channelFromSocketAddress(locationServerAddress)
-
-			if err == nil {
-				defer ch.Close()
-				for {
-					e.makeLocationMessage(&m)
-					t2s := e.makeTraceletToServerMessage(0)
-					t2s.Type = &pb.TraceletToServer_Location_{Location: &m}
-					if loopCnt%3 == 0 {
-						makeMetricsMessage(loopCnt, &metrics)
-						t2s.Metrics = &metrics
-					}
-					loopCnt++
-
-					fmt.Printf("locationClient WriteMessage: %v\n", t2s)
-
-					err := ch.WriteMessage(t2s)
-					if err != nil {
-						log.Printf("locationClient WriteMessage failed, %v\n", err)
-						break
-					}
-					time.Sleep(1000 * time.Millisecond)
+			for {
+				e.makeLocationMessage(&m)
+				t2s := e.makeTraceletToServerMessage(0)
+				t2s.Type = &pb.TraceletToServer_Location_{Location: &m}
+				if loopCnt%3 == 0 {
+					makeMetricsMessage(lsiClient, loopCnt, &metrics)
+					t2s.Metrics = &metrics
 				}
+				loopCnt++
+
+				log.Printf("locationClient WriteMessage: %v\n", t2s)
+
+				payload, err := proto.Marshal(t2s)
+				if err != nil {
+					log.Printf("locationClient: failed to marshal TraceletToServer message: %v\n", err)
+					continue
+				}
+				lsiClient.PushMessage(payload)
+
+				time.Sleep(1000 * time.Millisecond)
 			}
-			time.Sleep(1000 * time.Millisecond)
 		}
 	}()
 	return nil
 }
 
-func (e *Tracelet) makeTraceletToServerMessage(id int32) *pb.TraceletToServer {
+func IPv4ToUint32(s string) (uint32, error) {
+	ip := net.ParseIP(s).To4()
+	if ip == nil {
+		return 0, fmt.Errorf("invalid IPv4 address: %q", s)
+	}
+	return binary.BigEndian.Uint32(ip), nil
+}
+
+func (e *Tracelet) makeTraceletToServerMessage(_ int32) *pb.TraceletToServer {
+	uuid := uuid.New()
+	msgID := pb.TraceletMessageID{
+		Value: uuid[:],
+	}
+	ipAsUint32, err := IPv4ToUint32(e.IPv4Address)
+	if err != nil {
+		log.Printf("failed to convert IPv4 address to uint32: %v\n", err)
+		return nil
+	}
 	return &pb.TraceletToServer{
-		Id:         id,
-		TraceletId: e.deviceID,
-		Ignition:   true,
-		DeliveryTs: timestamppb.Now(),
+		TraceletId:  e.deviceID,
+		Ignition:    true,
+		DeliveryTs:  timestamppb.Now(),
+		Uuid:        &msgID,
+		Ipv4Address: ipAsUint32,
 	}
 }
 
@@ -99,6 +116,15 @@ func (e *Tracelet) makeLocationMessage(m *pb.TraceletToServer_Location) {
 	m.Gnss.Epv = rand.Float64() * 5
 	m.Gnss.FixType = e.loc.gnssFix
 
+	m.Uwb.Valid = e.loc.uwbValid
+	m.Uwb.X = e.loc.uwbX
+	m.Uwb.Y = e.loc.uwbY
+	m.Uwb.Z = e.loc.uwbZ
+	m.Uwb.Eph = rand.Float64() * 0.2
+	m.Uwb.FixType = 1
+
+	// for simplicity, just use GNSS as fused location
+
 	m.Fused.Valid = true
 	m.Fused.Latitude = e.loc.gnssLat
 	m.Fused.Longitude = e.loc.gnssLon
@@ -106,7 +132,7 @@ func (e *Tracelet) makeLocationMessage(m *pb.TraceletToServer_Location) {
 	m.Fused.Eph = m.Gnss.Eph
 
 	m.Speed = rand.Float64() * 10
-	m.Temperature = rand.Float64() * 10 + 29
+	m.Temperature = rand.Float64()*10 + 29
 }
 
 func (e *Tracelet) locationGenerator() {
@@ -114,10 +140,10 @@ func (e *Tracelet) locationGenerator() {
 
 		for {
 			loc := location{
-				uwbValid:  false,
-				uwbX:      5.0,
-				uwbY:      6.21,
-				uwbZ:      7.5,
+				uwbValid:  true,
+				uwbX:      5.0 + rand.Float64()*10,
+				uwbY:      6.21 + rand.Float64()*10,
+				uwbZ:      7.5 + rand.Float64()*10,
 				gnssValid: true,
 				gnssLat:   49.425111 + rand.Float64()*0.0001,
 				gnssLon:   11.077378 + rand.Float64()*0.0001,
@@ -135,33 +161,33 @@ func (e *Tracelet) locationGenerator() {
 }
 
 // generate some random metrics
-func makeMetricsMessage(loop int, m *pb.TraceletMetrics)  {
+func makeMetricsMessage(lsiClient *lsiclient.Instance,  loop int, m *pb.TraceletMetrics) {
 	m.Health__Type__UwbComm = 1
 	m.Health__Type__UwbFirmware = 0
 	m.Health__Type__GnssComm = 1
 	m.FreeHeapBytes = int64(rand.Intn(1000) + 20000)
-	m.WifiRssiDbm = 100.0 - rand.Float64() * 50
+	m.WifiRssiDbm = 100.0 - rand.Float64()*50
 	m.NtripIsConnected = int64(rand.Intn(2))
 	m.SntpUpdates += int64(rand.Intn(2))
 
-	if loop % 20 == 0 {
+	if loop%20 == 0 {
 		m.WifiAp = 123
 	} else {
 		m.WifiAp = 456
 	}
-	m.GnssNumSats__System__Gps = int64(rand.Intn(10)+3)
-	m.GnssNumSats__System__Glonass = int64(rand.Intn(10)+3)
-	m.GnssNumSats__System__Galileo = int64(rand.Intn(10)+3)
-	m.GnssNumSv = m.GnssNumSats__System__Gps + m.GnssNumSats__System__Glonass + m.GnssNumSats__System__Galileo -1 
+	m.GnssNumSats__System__Gps = int64(rand.Intn(10) + 3)
+	m.GnssNumSats__System__Glonass = int64(rand.Intn(10) + 3)
+	m.GnssNumSats__System__Galileo = int64(rand.Intn(10) + 3)
+	m.GnssNumSv = m.GnssNumSats__System__Gps + m.GnssNumSats__System__Glonass + m.GnssNumSats__System__Galileo - 1
 	m.GnssPga__Block__Rf1 = int64(rand.Intn(5)) + 40
 	m.GnssPga__Block__Rf2 = int64(rand.Intn(5)) + 36
-}
-
-func channelFromSocketAddress(address string) (*client.Channel, error) {
-	c, err := client.NewUDPClientFromSocketAddress(address)
-	if err != nil {
-		return nil, errors.New("can't create UDP client: " + err.Error())
+	m.CpuLoadPercent__Cpu___0 = int64(rand.Intn(20) + 10)
+	m.CpuLoadPercent__Cpu___1 = int64(rand.Intn(20) + 10)
+	if lsiClient.IsConnected {
+		m.LsiIsConnected = 1
+	} else {
+		m.LsiIsConnected = 0
 	}
-
-	return c.Ch, nil
+	m.LsiAcksMissed = int64(lsiClient.AcksMissed)
+	m.ResetCount__Type__Poweron = 1
 }
