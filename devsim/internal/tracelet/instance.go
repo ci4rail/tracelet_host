@@ -14,19 +14,41 @@ limitations under the License.
 package tracelet
 
 import (
+	"fmt"
 	"sync"
 
 	io4edgecore "github.com/ci4rail/tracelet_host/devsim/pkg/io4edge_core"
+	lsiclient "github.com/ci4rail/tracelet_host/devsim/pkg/lsi_client"
 )
 
 // Tracelet represents the tracelet functionality
 type Tracelet struct {
-	loc         location
-	locMutex    sync.Mutex // mutex to protect loc
-	deviceID    string
-	IPv4Address string
-	coreDev     *io4edgecore.Device
-	posParams   *io4edgecore.ParameterSet
+	loc            location
+	locMutex       sync.Mutex // mutex to protect loc
+	deviceID       string
+	IPv4Address    string
+	coreDev        *io4edgecore.Device
+	posParams      *io4edgecore.ParameterSet
+	mode           Mode
+	trackFile      string
+	replayMessages ReplayMessages
+	lsiClient      *lsiclient.Instance
+}
+
+type Mode string
+
+const (
+	ModeRandom Mode = "random"
+	ModeReplay Mode = "replay"
+)
+
+type Config struct {
+	DeviceID              string
+	LocationServerAddress string
+	IPv4Address           string
+	HTTPSPort             int
+	Mode                  Mode
+	TrackFile             string
 }
 
 var posParamDefs = []io4edgecore.ParameterDefinition{
@@ -58,10 +80,37 @@ var posParamDefs = []io4edgecore.ParameterDefinition{
 
 // NewInstance creates a new tracelet simulator instance
 func NewInstance(deviceID string, locationServerAddress string, IPv4Address string, httpsPort int) (*Tracelet, error) {
+	return NewInstanceWithConfig(Config{
+		DeviceID:              deviceID,
+		LocationServerAddress: locationServerAddress,
+		IPv4Address:           IPv4Address,
+		HTTPSPort:             httpsPort,
+		Mode:                  ModeRandom,
+	})
+}
+
+func NewInstanceWithConfig(cfg Config) (*Tracelet, error) {
+	if cfg.Mode == "" {
+		cfg.Mode = ModeRandom
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+
 	tl := &Tracelet{
 		locMutex:    sync.Mutex{},
-		deviceID:    deviceID,
-		IPv4Address: IPv4Address,
+		deviceID:    cfg.DeviceID,
+		IPv4Address: cfg.IPv4Address,
+		mode:        cfg.Mode,
+		trackFile:   cfg.TrackFile,
+	}
+
+	if cfg.Mode == ModeReplay {
+		replayMessages, err := loadReplayMessages(cfg.TrackFile, cfg.DeviceID, cfg.IPv4Address)
+		if err != nil {
+			return nil, err
+		}
+		tl.replayMessages = replayMessages
 	}
 
 	nvs, err := io4edgecore.NewParamNamespace("pos")
@@ -75,7 +124,7 @@ func NewInstance(deviceID string, locationServerAddress string, IPv4Address stri
 	tl.posParams = ps
 
 	coreDev, err := io4edgecore.NewDevice(
-		httpsPort,
+		cfg.HTTPSPort,
 		&io4edgecore.FirmwareVersion{
 			Name:    "tracelet",
 			Version: "1.0.0",
@@ -83,7 +132,7 @@ func NewInstance(deviceID string, locationServerAddress string, IPv4Address stri
 		&io4edgecore.HardwareInventory{
 			Name:   "devsim",
 			Rev:    1,
-			Serial: deviceID,
+			Serial: cfg.DeviceID,
 		},
 		[]io4edgecore.RouteRegistrar{
 			RegistrarTracelet(tl),
@@ -93,11 +142,27 @@ func NewInstance(deviceID string, locationServerAddress string, IPv4Address stri
 		return nil, err
 	}
 	tl.coreDev = coreDev
-	err = tl.locationClient(locationServerAddress)
+	err = tl.locationClient(cfg.LocationServerAddress)
 	if err != nil {
 		return nil, err
 	}
-	tl.locationGenerator()
+	if tl.mode == ModeRandom {
+		tl.locationGenerator()
+	}
 
 	return tl, nil
+}
+
+func (cfg Config) validate() error {
+	switch cfg.Mode {
+	case ModeRandom:
+		return nil
+	case ModeReplay:
+		if cfg.TrackFile == "" {
+			return fmt.Errorf("track file is required in replay mode")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported tracelet mode %q", cfg.Mode)
+	}
 }

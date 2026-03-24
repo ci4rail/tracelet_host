@@ -19,8 +19,8 @@ import (
 	"os"
 
 	"github.com/ci4rail/tracelet_host/devsim/internal/tracelet"
-	"github.com/ci4rail/tracelet_host/devsim/pkg/version"
 	"github.com/ci4rail/tracelet_host/devsim/pkg/getip"
+	"github.com/ci4rail/tracelet_host/devsim/pkg/version"
 	"github.com/spf13/cobra"
 )
 
@@ -29,6 +29,8 @@ var (
 	IPv4Address           string
 	locationServerAddress string
 	httpsPort             int = 443
+	traceletMode          string
+	trackFile             string
 )
 
 func main() {
@@ -42,7 +44,7 @@ func main() {
 var rootCmd = &cobra.Command{
 	Use:   "devsim",
 	Short: "tracelet simulator",
-	Long:  `Simulate a tracelet like SIO02`,
+	Long:  `Simulate a tracelet like LTR01`,
 	Run: func(cmd *cobra.Command, args []string) {
 		log.Printf("devsim version: %s\n", version.Version)
 
@@ -55,7 +57,14 @@ var rootCmd = &cobra.Command{
 		}
 		log.Printf("Using IPv4 address: %s\n", IPv4Address)
 
-		_, err := tracelet.NewInstance(deviceID, locationServerAddress, IPv4Address, httpsPort)
+		_, err := tracelet.NewInstanceWithConfig(tracelet.Config{
+			DeviceID:              deviceID,
+			LocationServerAddress: locationServerAddress,
+			IPv4Address:           IPv4Address,
+			HTTPSPort:             httpsPort,
+			Mode:                  tracelet.Mode(traceletMode),
+			TrackFile:             trackFile,
+		})
 
 		if err != nil {
 			log.Fatalf("Failed to create tracelet instance: %s", err)
@@ -69,4 +78,6 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&IPv4Address, "ipv4", "i", "", "IPv4 address to use (if not given, auto detected)")
 	rootCmd.PersistentFlags().StringVarP(&locationServerAddress, "loc-srv", "l", "127.0.0.1:11002", "IP address of location server with port")
 	rootCmd.PersistentFlags().IntVarP(&httpsPort, "https-port", "p", 443, "HTTPS port to use")
+	rootCmd.PersistentFlags().StringVar(&traceletMode, "mode", string(tracelet.ModeRandom), "tracelet simulator mode: random or replay")
+	rootCmd.PersistentFlags().StringVar(&trackFile, "track-file", "", "track JSON file to replay when --mode=replay")
 }

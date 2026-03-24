@@ -15,17 +15,20 @@ package tracelet
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
 	"net"
+	"os"
 	"time"
 
 	pb "github.com/ci4rail/io4edge_api/tracelet/go/tracelet"
+	lsiclient "github.com/ci4rail/tracelet_host/devsim/pkg/lsi_client"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	lsiclient "github.com/ci4rail/tracelet_host/devsim/pkg/lsi_client"
 )
 
 type location struct {
@@ -40,39 +43,17 @@ type location struct {
 	gnssFix   int32
 }
 
+type ReplayMessages []*pb.TraceletToServer
+
 // publish location to server periodically
 func (e *Tracelet) locationClient(locationServerAddress string) error {
-	lsiClient := lsiclient.NewInstance(locationServerAddress)
-	metrics := pb.TraceletMetrics{}
-	m := pb.TraceletToServer_Location{
-		Gnss:  &pb.TraceletToServer_Location_Gnss{},
-		Uwb:   &pb.TraceletToServer_Location_Uwb{},
-		Fused: &pb.TraceletToServer_Location_Fused{},
-	}
+	e.lsiClient = lsiclient.NewInstance(locationServerAddress)
 	go func() {
-		loopCnt := 0
-		for {
-			for {
-				e.makeLocationMessage(&m)
-				t2s := e.makeTraceletToServerMessage(0)
-				t2s.Type = &pb.TraceletToServer_Location_{Location: &m}
-				if loopCnt%3 == 0 {
-					makeMetricsMessage(lsiClient, loopCnt, &metrics)
-					t2s.Metrics = &metrics
-				}
-				loopCnt++
-
-				log.Printf("locationClient WriteMessage: %v\n", t2s)
-
-				payload, err := proto.Marshal(t2s)
-				if err != nil {
-					log.Printf("locationClient: failed to marshal TraceletToServer message: %v\n", err)
-					continue
-				}
-				lsiClient.PushMessage(payload)
-
-				time.Sleep(1000 * time.Millisecond)
-			}
+		switch e.mode {
+		case ModeReplay:
+			e.replayLocationMessages()
+		default:
+			e.publishGeneratedMessages()
 		}
 	}()
 	return nil
@@ -87,9 +68,9 @@ func IPv4ToUint32(s string) (uint32, error) {
 }
 
 func (e *Tracelet) makeTraceletToServerMessage(_ int32) *pb.TraceletToServer {
-	uuid := uuid.New()
+	u := uuid.New()
 	msgID := pb.TraceletMessageID{
-		Value: uuid[:],
+		Value: u[:],
 	}
 	ipAsUint32, err := IPv4ToUint32(e.IPv4Address)
 	if err != nil {
@@ -123,8 +104,7 @@ func (e *Tracelet) makeLocationMessage(m *pb.TraceletToServer_Location) {
 	m.Uwb.Eph = rand.Float64() * 0.2
 	m.Uwb.FixType = 1
 
-	// for simplicity, just use GNSS as fused location
-
+	// For the simulator, treat GNSS as the fused position.
 	m.Fused.Valid = true
 	m.Fused.Latitude = e.loc.gnssLat
 	m.Fused.Longitude = e.loc.gnssLon
@@ -137,7 +117,6 @@ func (e *Tracelet) makeLocationMessage(m *pb.TraceletToServer_Location) {
 
 func (e *Tracelet) locationGenerator() {
 	go func() {
-
 		for {
 			loc := location{
 				uwbValid:  true,
@@ -157,11 +136,112 @@ func (e *Tracelet) locationGenerator() {
 			time.Sleep(1000 * time.Millisecond)
 		}
 	}()
+}
 
+func (e *Tracelet) publishGeneratedMessages() {
+	metrics := pb.TraceletMetrics{}
+	m := pb.TraceletToServer_Location{
+		Gnss:  &pb.TraceletToServer_Location_Gnss{},
+		Uwb:   &pb.TraceletToServer_Location_Uwb{},
+		Fused: &pb.TraceletToServer_Location_Fused{},
+	}
+
+	loopCnt := 0
+	for {
+		e.makeLocationMessage(&m)
+		t2s := e.makeTraceletToServerMessage(0)
+		if t2s == nil {
+			time.Sleep(time.Second)
+			continue
+		}
+		t2s.Type = &pb.TraceletToServer_Location_{Location: &m}
+		if loopCnt%3 == 0 {
+			makeMetricsMessage(e.lsiClient, loopCnt, &metrics)
+			t2s.Metrics = &metrics
+		}
+		loopCnt++
+		e.pushMessage(t2s)
+		time.Sleep(1000 * time.Millisecond)
+	}
+}
+
+func (e *Tracelet) replayLocationMessages() {
+	if len(e.replayMessages) == 0 {
+		log.Printf("tracelet replay mode: no messages loaded from %s", e.trackFile)
+		return
+	}
+
+	for {
+		var previous time.Time
+		for idx, msg := range e.replayMessages {
+			if idx > 0 {
+				delay := msg.GetDeliveryTs().AsTime().Sub(previous)
+				if delay > 0 {
+					time.Sleep(delay)
+				}
+			}
+			e.pushMessage(msg)
+			previous = msg.GetDeliveryTs().AsTime()
+		}
+	}
+}
+
+func (e *Tracelet) pushMessage(t2s *pb.TraceletToServer) {
+	log.Printf("locationClient WriteMessage: %v\n", t2s)
+
+	payload, err := proto.Marshal(t2s)
+	if err != nil {
+		log.Printf("locationClient: failed to marshal TraceletToServer message: %v\n", err)
+		return
+	}
+	e.lsiClient.PushMessage(payload)
+}
+
+func loadReplayMessages(trackFile string, deviceID string, ipv4Address string) (ReplayMessages, error) {
+	data, err := os.ReadFile(trackFile)
+	if err != nil {
+		return nil, fmt.Errorf("read track file %q: %w", trackFile, err)
+	}
+
+	var rawMessages []json.RawMessage
+	if err := json.Unmarshal(data, &rawMessages); err != nil {
+		return nil, fmt.Errorf("decode track file %q: %w", trackFile, err)
+	}
+	if len(rawMessages) == 0 {
+		return nil, fmt.Errorf("track file %q contains no messages", trackFile)
+	}
+
+	messages := make(ReplayMessages, 0, len(rawMessages))
+	unmarshalOptions := protojson.UnmarshalOptions{
+		DiscardUnknown: true,
+	}
+
+	for idx, raw := range rawMessages {
+		msg := &pb.TraceletToServer{}
+		if err := unmarshalOptions.Unmarshal(raw, msg); err != nil {
+			return nil, fmt.Errorf("decode replay message %d from %q: %w", idx, trackFile, err)
+		}
+		if msg.GetLocation() == nil {
+			return nil, fmt.Errorf("replay message %d from %q has no location payload", idx, trackFile)
+		}
+		if deviceID != "" {
+			msg.TraceletId = deviceID
+		}
+		if ipv4Address != "" {
+			ipAsUint32, err := IPv4ToUint32(ipv4Address)
+			if err != nil {
+				return nil, err
+			}
+			msg.Ipv4Address = ipAsUint32
+		}
+		messages = append(messages, msg)
+	}
+
+	return messages, nil
 }
 
 // generate some random metrics
-func makeMetricsMessage(lsiClient *lsiclient.Instance,  loop int, m *pb.TraceletMetrics) {
+func makeMetricsMessage(lsiClient *lsiclient.Instance, loop int, m *pb.TraceletMetrics) {
 	m.Health__Type__UwbComm = 1
 	m.Health__Type__UwbFirmware = 0
 	m.Health__Type__GnssComm = 1
