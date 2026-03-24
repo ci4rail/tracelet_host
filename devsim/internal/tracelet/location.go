@@ -216,11 +216,23 @@ func loadReplayMessages(trackFile string, deviceID string, ipv4Address string) (
 		DiscardUnknown: true,
 	}
 
+	var timeShift time.Duration
+
 	for idx, raw := range rawMessages {
 		msg := &pb.TraceletToServer{}
 		if err := unmarshalOptions.Unmarshal(raw, msg); err != nil {
 			return nil, fmt.Errorf("decode replay message %d from %q: %w", idx, trackFile, err)
 		}
+
+		if idx == 0 {
+			// use timestamp of first message as reference and shift all messages to start from now
+			now := time.Now()
+			firstMsgTime := msg.GetDeliveryTs().AsTime()
+			timeShift = now.Sub(firstMsgTime)
+			log.Printf("Shifting replay messages by %s to align first message with current time\n", timeShift)
+		}
+		msg.DeliveryTs = timestamppb.New(msg.GetDeliveryTs().AsTime().Add(timeShift))
+
 		if msg.GetLocation() == nil {
 			return nil, fmt.Errorf("replay message %d from %q has no location payload", idx, trackFile)
 		}

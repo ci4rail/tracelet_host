@@ -55,6 +55,12 @@ func waitForAck(conn net.Conn, seq uint32) error {
 		ack := make([]byte, 4)
 		n, err := conn.Read(ack)
 		if err != nil {
+			// delay if error is not a timeout
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				return err
+			}
+			time.Sleep(200 * time.Millisecond)
+			log.Printf("Failed to read ack: %v", err)
 			return err
 		}
 		if n < 4 {
