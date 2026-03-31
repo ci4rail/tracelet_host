@@ -172,17 +172,30 @@ func (e *Tracelet) replayLocationMessages() {
 	}
 
 	for {
-		var previous time.Time
-		for idx, msg := range e.replayMessages {
-			if idx > 0 {
-				delay := msg.GetDeliveryTs().AsTime().Sub(previous)
-				if delay > 0 {
-					time.Sleep(delay)
-				}
-			}
-			e.pushMessage(msg)
-			previous = msg.GetDeliveryTs().AsTime()
+		e.replayLocationMessagesOnce()
+	}
+}
+
+// replay track. Do time shift according to current time
+func (e *Tracelet) replayLocationMessagesOnce() {
+
+	now := time.Now().Add(time.Duration(2*time.Second))
+	firstMsgTime := e.replayMessages[0].GetDeliveryTs().AsTime()
+	timeShift := now.Sub(firstMsgTime)
+	log.Printf("Starting replay of %d messages from track file %s with time shift %s\n", len(e.replayMessages), e.trackFile, timeShift)
+
+	for _, msg := range e.replayMessages {
+		copied := proto.Clone(msg).(*pb.TraceletToServer)
+
+    	shiftedTime := copied.GetDeliveryTs().AsTime().Add(timeShift)
+    	copied.DeliveryTs = timestamppb.New(shiftedTime)
+		if copied.Metrics != nil {
+			m := copied.Metrics
+			m.SystemTimeSeconds += timeShift.Seconds()
+			m.LastPowerCutUnixSeconds += int64(timeShift.Seconds())
 		}
+	    time.Sleep(time.Until(shiftedTime))
+    	e.pushMessage(copied)
 	}
 }
 
@@ -216,23 +229,19 @@ func loadReplayMessages(trackFile string, deviceID string, ipv4Address string) (
 		DiscardUnknown: true,
 	}
 
-	var timeShift time.Duration
-
+	var lastTs time.Time
 	for idx, raw := range rawMessages {
 		msg := &pb.TraceletToServer{}
 		if err := unmarshalOptions.Unmarshal(raw, msg); err != nil {
 			return nil, fmt.Errorf("decode replay message %d from %q: %w", idx, trackFile, err)
 		}
 
-		if idx == 0 {
-			// use timestamp of first message as reference and shift all messages to start from now
-			now := time.Now()
-			firstMsgTime := msg.GetDeliveryTs().AsTime()
-			timeShift = now.Sub(firstMsgTime)
-			log.Printf("Shifting replay messages by %s to align first message with current time\n", timeShift)
+		if idx != 0 {
+			if msg.GetDeliveryTs().AsTime().Before(lastTs) {
+				return nil, fmt.Errorf("replay message %d from %q has non-monotonic timestamp", idx, trackFile)
+			}
 		}
-		msg.DeliveryTs = timestamppb.New(msg.GetDeliveryTs().AsTime().Add(timeShift))
-
+		lastTs = msg.GetDeliveryTs().AsTime()
 		if msg.GetLocation() == nil {
 			return nil, fmt.Errorf("replay message %d from %q has no location payload", idx, trackFile)
 		}
