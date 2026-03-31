@@ -301,7 +301,7 @@ func restartDevice() {
 // POST /restart
 func postRestart(_ *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusAccepted)
+		w.WriteHeader(http.StatusOK)
 		restartDevice()
 	}
 }
@@ -310,7 +310,7 @@ func postRestart(_ *CoreServer) http.HandlerFunc {
 func postFactoryReset(_ *CoreServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ParameterSetForceFactoryDefaults()
-		w.WriteHeader(http.StatusAccepted)
+		w.WriteHeader(http.StatusOK)
 		restartDevice()
 	}
 }
