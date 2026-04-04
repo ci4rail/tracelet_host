@@ -5,7 +5,7 @@ go 1.23
 toolchain go1.23.2
 
 require (
-	github.com/ci4rail/io4edge-client-go/v2 v2.0.3-t1
+	github.com/ci4rail/io4edge-client-go/v2 v2.1.1
 	github.com/ci4rail/io4edge_api v1.1.0-ci
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/google/uuid v1.6.0

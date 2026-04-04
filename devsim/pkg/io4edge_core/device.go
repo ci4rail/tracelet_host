@@ -1,9 +1,7 @@
 package io4edgecore
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 )
 
 type FirmwareVersion struct {
@@ -12,9 +10,9 @@ type FirmwareVersion struct {
 }
 
 type HardwareInventory struct {
-	Name   string `json:"name"`
-	Rev    int    `json:"rev"`
-	Serial string `json:"serial"`
+	Name   string `json:"part_number"`  
+	Rev    int    `json:"major_version"`
+	Serial string `json:"serial_number"`
 }
 
 var globalParamDefs = []ParameterDefinition{
@@ -34,6 +32,14 @@ var globalParamDefs = []ParameterDefinition{
 		RebootRequired: true,
 		Validator:      nil,
 	},
+	{
+		Key:            "device-id",
+		Description:    "Device ID",
+		DefaultValue:   "",
+		MaxLen:         64,
+		RebootRequired: true,
+		Validator:      nil,
+	},
 }
 
 type Device struct {
@@ -46,27 +52,7 @@ type Device struct {
 	cs           *CoreServer
 }
 
-// read firmware name and version from firmware file
-func Firmware() FirmwareVersion {
-	f, err := os.Open(firmwareFile)
-	if err != nil {
-		return FirmwareVersion{}
-	}
-	defer f.Close()
-
-	var fw FirmwareVersion
-	if err := json.NewDecoder(f).Decode(&fw); err != nil {
-		return FirmwareVersion{}
-	}
-	return fw
-}
-
-func NewDevice(httpsPort int, fw *FirmwareVersion, hw *HardwareInventory, additionalRoutes []RouteRegistrar) (*Device, error) {
-	fwFromFile := Firmware()
-	if fwFromFile.Name != "" && fwFromFile.Version != "" {
-		fw = &fwFromFile
-	}
-
+func NewDevice(httpsPort int, deviceID string, fw *FirmwareVersion, hw *HardwareInventory, additionalRoutes []RouteRegistrar) (*Device, error) {
 	d := &Device{
 		fw:   fw,
 		hw:   hw,
@@ -81,7 +67,7 @@ func NewDevice(httpsPort int, fw *FirmwareVersion, hw *HardwareInventory, additi
 		return nil, err
 	}
 	d.globalParams = ps
-
+	ps.ParamSetSingle("device-id", deviceID)
 	cs, err := NewCoreServer(d, fmt.Sprintf(":%d", httpsPort), additionalRoutes)
 	if err != nil {
 		return nil, err

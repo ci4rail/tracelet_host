@@ -302,6 +302,7 @@ func NewInstanceWithConfig(cfg Config) (*Tracelet, error) {
 
 	coreDev, err := io4edgecore.NewDevice(
 		cfg.HTTPSPort,
+		cfg.DeviceID,
 		&io4edgecore.FirmwareVersion{
 			Name:    "tracelet",
 			Version: "1.0.0",

@@ -63,6 +63,10 @@ type CoreServer struct {
 }
 
 func NewCoreServer(dev *Device, addr string, additionalRoutes []RouteRegistrar) (*CoreServer, error) {
+	if fw, ok := firmwareFromFile(firmwareFile); ok {
+		dev.fw = fw
+	}
+
 	cs := &CoreServer{
 		dev:      dev,
 		username: defaultUser,
@@ -72,6 +76,28 @@ func NewCoreServer(dev *Device, addr string, additionalRoutes []RouteRegistrar) 
 		return nil, fmt.Errorf("failed to start core server: %w", err)
 	}
 	return cs, nil
+}
+
+func firmwareFromFile(path string) (*FirmwareVersion, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("failed to open %s: %v", path, err)
+		}
+		return nil, false
+	}
+	defer f.Close()
+
+	var fw FirmwareVersion
+	if err := json.NewDecoder(f).Decode(&fw); err != nil {
+		log.Printf("failed to decode firmware header from %s: %v", path, err)
+		return nil, false
+	}
+	log.Printf("Loaded firmware version from %s: %s %s", path, fw.Name, fw.Version)
+	if fw.Name == "" || fw.Version == "" {
+		return nil, false
+	}
+	return &fw, true
 }
 
 // --- Basic auth middleware ---------------------------------------------------
@@ -292,7 +318,7 @@ func restartDevice() {
 	go func() {
 		// In a real device, this would trigger a system restart.
 		// Here we just exit the process (let docker restart it).
-		time.Sleep(5 * time.Second) // give client time to receive response
+		time.Sleep(1 * time.Second) // give client time to receive response
 		log.Println("Simulated device restart")
 		os.Exit(0)
 	}()
