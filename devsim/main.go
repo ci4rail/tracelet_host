@@ -29,6 +29,7 @@ var (
 	IPv4Address           string
 	locationServerAddress string
 	httpsPort             int = 443
+	corePass              string
 	traceletMode          string
 	trackFile             string
 )
@@ -62,6 +63,7 @@ var rootCmd = &cobra.Command{
 			LocationServerAddress: locationServerAddress,
 			IPv4Address:           IPv4Address,
 			HTTPSPort:             httpsPort,
+			CorePass:              corePass,
 			Mode:                  tracelet.Mode(traceletMode),
 			TrackFile:             trackFile,
 		})
@@ -78,6 +80,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&IPv4Address, "ipv4", "i", "", "IPv4 address to use (if not given, auto detected)")
 	rootCmd.PersistentFlags().StringVarP(&locationServerAddress, "loc-srv", "l", "127.0.0.1:11002", "IP address of location server with port")
 	rootCmd.PersistentFlags().IntVarP(&httpsPort, "https-port", "p", 443, "HTTPS port to use")
+	rootCmd.PersistentFlags().StringVar(&corePass, "core-pass", "core_io4edge", "password to use for core server basic auth")
 	rootCmd.PersistentFlags().StringVar(&traceletMode, "mode", string(tracelet.ModeRandom), "tracelet simulator mode: random or replay")
 	rootCmd.PersistentFlags().StringVar(&trackFile, "track-file", "", "track JSON file to replay when --mode=replay")
 }

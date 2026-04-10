@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:1.2
 
 # get modules, if they don't change the cache can be used for faster builds
-FROM --platform=$BUILDPLATFORM golang:1.23 AS base
+FROM --platform=$BUILDPLATFORM golang:1.25.2 AS base
 ENV GO111MODULE=on
 ENV CGO_ENABLED=0
 WORKDIR /src

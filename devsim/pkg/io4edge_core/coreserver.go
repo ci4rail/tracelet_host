@@ -62,15 +62,18 @@ type CoreServer struct {
 	privateKeyPEM  string
 }
 
-func NewCoreServer(dev *Device, addr string, additionalRoutes []RouteRegistrar) (*CoreServer, error) {
+func NewCoreServer(dev *Device, addr string, password string, additionalRoutes []RouteRegistrar) (*CoreServer, error) {
 	if fw, ok := firmwareFromFile(firmwareFile); ok {
 		dev.fw = fw
+	}
+	if password == "" {
+		password = defaultPass
 	}
 
 	cs := &CoreServer{
 		dev:      dev,
 		username: defaultUser,
-		password: defaultPass,
+		password: password,
 	}
 	if err := cs.start(addr, additionalRoutes); err != nil {
 		return nil, fmt.Errorf("failed to start core server: %w", err)

@@ -10,7 +10,7 @@ type FirmwareVersion struct {
 }
 
 type HardwareInventory struct {
-	Name   string `json:"part_number"`  
+	Name   string `json:"part_number"`
 	Rev    int    `json:"major_version"`
 	Serial string `json:"serial_number"`
 }
@@ -52,7 +52,7 @@ type Device struct {
 	cs           *CoreServer
 }
 
-func NewDevice(httpsPort int, deviceID string, fw *FirmwareVersion, hw *HardwareInventory, additionalRoutes []RouteRegistrar) (*Device, error) {
+func NewDevice(httpsPort int, deviceID string, corePass string, fw *FirmwareVersion, hw *HardwareInventory, additionalRoutes []RouteRegistrar) (*Device, error) {
 	d := &Device{
 		fw:   fw,
 		hw:   hw,
@@ -68,7 +68,7 @@ func NewDevice(httpsPort int, deviceID string, fw *FirmwareVersion, hw *Hardware
 	}
 	d.globalParams = ps
 	ps.ParamSetSingle("device-id", deviceID)
-	cs, err := NewCoreServer(d, fmt.Sprintf(":%d", httpsPort), additionalRoutes)
+	cs, err := NewCoreServer(d, fmt.Sprintf(":%d", httpsPort), corePass, additionalRoutes)
 	if err != nil {
 		return nil, err
 	}
