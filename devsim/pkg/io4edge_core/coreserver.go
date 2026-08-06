@@ -65,6 +65,7 @@ type CoreServer struct {
 func NewCoreServer(dev *Device, addr string, password string, additionalRoutes []RouteRegistrar) (*CoreServer, error) {
 	if fw, ok := firmwareFromFile(firmwareFile); ok {
 		dev.fw = fw
+		fmt.Printf("Loaded firmware version from file: %s %s\n", fw.Name, fw.Version)
 	}
 	if password == "" {
 		password = defaultPass
@@ -113,6 +114,7 @@ func basicAuth(cs *CoreServer) func(http.Handler) http.Handler {
 			if !ok || u != cs.username || p != cs.password {
 				w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
 				httpError(w, http.StatusUnauthorized, "unauthorized")
+				time.Sleep(5 * time.Second) // simple brute-force mitigation
 				return
 			}
 			next.ServeHTTP(w, r)

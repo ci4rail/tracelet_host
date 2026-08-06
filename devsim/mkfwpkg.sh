@@ -56,4 +56,3 @@ pkg_name=fw-${short_hwname}-${fw_variant}-${fw_version}${output_file_suffix}.fwp
 tar cf ${pkg_name} -C ${tmp_dir} . --owner=root --group=root
 
 echo created ${pkg_name}
-echo "fwpkg=${pkg_name}" >> $GITHUB_OUTPUT
