@@ -40,6 +40,14 @@ var globalParamDefs = []ParameterDefinition{
 		RebootRequired: true,
 		Validator:      nil,
 	},
+	{
+		Key:            "wifi-low-rssi",
+		Description:    "WiFi Low RSSI Threshold",
+		DefaultValue:   "-100",
+		MaxLen:         10,
+		RebootRequired: true,
+		Validator:      nil,
+	},
 }
 
 type Device struct {
